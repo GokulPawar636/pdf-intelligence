@@ -1,0 +1,13 @@
+.git
+.venv
+.pytest_cache
+__pycache__
+*.py[cod]
+.env
+data/output
+data/input
+tmp
+tests
+*.xlsx
+*.xls
+*.pdf

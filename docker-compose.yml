@@ -1,0 +1,11 @@
+services:
+  pdf-intelligence:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
