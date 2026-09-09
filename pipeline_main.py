@@ -87,6 +87,10 @@ def run_pipeline(pdf: str | Path, output_dir: str | Path = "data/output", *,
         payload = json.loads(Path(semantic).read_text(encoding="utf-8"))
         layout = json.loads(Path(structure).read_text(encoding="utf-8"))
         issues = list(payload.get("warnings", []))
+        # Record-level uncertainty must also reach the manifest and upload UI.
+        # Keeping the raw cells does not establish that their inferred headers are correct.
+        issues.extend(f"Record {record.get('record_id')}: {warning}"
+                      for record in payload["records"] for warning in record.get("warnings", []))
         if not payload["records"]:
             issues.append("No readable records were extracted; OCR or manual review may be required.")
         for record in payload["records"]:
@@ -103,7 +107,12 @@ def run_pipeline(pdf: str | Path, output_dir: str | Path = "data/output", *,
         summary_rows = build_summary_rows(payload, layout)
         issues.extend(note for row in summary_rows for note in row.warnings)
         issues = list(dict.fromkeys(issues))
-        manifest.update(records=len(payload["records"]), warnings=issues)
+        manifest.update(records=len(payload["records"]), warnings=issues,
+                        quality={"warning_count": len(issues),
+                                 "measurement_rows": len(summary_rows),
+                                 "measurement_readings": sum(len(row.measurements) for row in summary_rows),
+                                 "review_required": bool(issues),
+                                 "accuracy_verified": False})
         if strict and issues:
             raise ValueError("Strict quality check failed. " + "; ".join(issues))
         payload["warnings"] = issues

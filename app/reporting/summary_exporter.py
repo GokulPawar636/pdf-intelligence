@@ -154,6 +154,24 @@ def build_summary_rows(document: dict, structured: dict) -> list[SummaryRow]:
                           (f"Ballooning No. {balloon}" if balloon else "Not stated"))
         reference = str(first("reference_feature") or (reference_match[1].strip() if reference_match else ""))
         warnings = [measurement_warning] if measurement_warning else []
+        for aliases in [("nom", "nominal", "nominal_value"),
+                        ("lower_tolerance", "lower_limit", "lsl"),
+                        ("upper_tolerance", "upper_limit", "usl")]:
+            supplied = [v for name in aliases for v in values.get(name, []) if v not in (None, "")]
+            parsed = [number(v) for v in supplied]
+            if any(v is None or abs(v) > Decimal("1e100") or len(v.as_tuple().digits) > 15
+                   for v in parsed):
+                warnings.append(f"Invalid or unsupported {aliases[0]} specification; verify the source.")
+                # Do not publish rounded or fallback specifications as valid limits.
+                nominal = lower = upper = None
+            if len(set(parsed)) > 1:
+                warnings.append(f"Conflicting {aliases[0]} specifications; verify the source.")
+                lower = upper = None
+        tolerances = {str(v).strip() for name in ("tol", "tolerance")
+                      for v in values.get(name, []) if v not in (None, "")}
+        if len(tolerances) > 1:
+            warnings.append("Conflicting tolerance specifications; verify the source.")
+            lower = upper = None
         if lower is None or upper is None:
             warnings.append("Limits unavailable: nominal or an explicit signed tolerance is missing.")
         if explicit_lower is not None or explicit_upper is not None:
@@ -369,16 +387,46 @@ def export_summary(semantic_path: str | Path, structured_path: str | Path, outpu
     sheet.page_setup.fitToWidth = 1
     sheet.page_setup.fitToHeight = 0
     sheet.sheet_properties.pageSetUpPr.fitToPage = True
-    sheet.print_area = f"A1:{heading_end}{6 + len(rows)}"
-    # A single workbook/sheet keeps the source records available below the report.
-    # They are outside the print area, not dropped by the summary projection.
-    detail_row = sheet.max_row + 3
-    sheet.merge_cells(start_row=detail_row, start_column=1, end_row=detail_row, end_column=6)
-    sheet.cell(detail_row, 1, "Source records and review notes (audit section)").font = Font(bold=True, color="17365D")
+    overview_start = 8 + len(rows)
+    statuses = [caches[f"{remark_letter}{r}"] for r in range(7, 7 + len(rows))]
+    repeated = sum(len(row.measurements) >= 2 for row in rows)
+    units = sorted({row.unit for row in rows if row.unit})
+    missing_units = sum(not row.unit for row in rows)
+    review_needed = bool(document["warnings"] or any(row.warnings for row in rows))
+    overview = [
+        ("Report overview", "Summary of the supplied measurements"),
+        ("Coverage", f"{len(rows)} characteristics | {sum(len(row.measurements) for row in rows)} readings | "
+         f"{repeated} characteristics have 2+ readings for variation calculations."),
+        ("Latest-reading results", f"Within tolerance: {statuses.count('OK')} | Out of tolerance: "
+         f"{statuses.count('Out of tolerance')} | Cannot determine / review: {statuses.count('Review')}"),
+        ("Units", (", ".join(units) if units else "Not stated in extracted measurement fields") +
+         (f" | Missing for {missing_units} characteristics; verify against PDF." if missing_units else "")),
+        ("Data quality", "Review required. See the raw data sheet for extraction notes; numeric tolerance results do not verify header interpretation."
+         if review_needed else "No implemented quality checks flagged an issue. This does not independently verify extraction accuracy."),
+        ("How to read results", "Results check the latest reading for each characteristic. Differences shows each reading separately. "
+         "N/A means too few readings for sample standard deviation and control limits; control limits are not specification limits."),
+        ("Report scope", "Snapshot of the input PDF. Regenerate after source corrections. Readings from different characteristics are not pooled into a single mean or variation."),
+    ]
+    for index, (label, value) in enumerate(overview, overview_start):
+        sheet.merge_cells(start_row=index, start_column=1, end_row=index, end_column=2)
+        sheet.merge_cells(start_row=index, start_column=3, end_row=index, end_column=stat_start + 6)
+        for column, text in ((1, label), (3, value)):
+            cell = sheet.cell(index, column, text)
+            cell.data_type = "s"
+            cell.font = Font(name="Arial", size=10, bold=column == 1, color="17365D")
+            cell.alignment = Alignment(wrap_text=True, vertical="center")
+            cell.fill = PatternFill("solid", fgColor="DCE6F1" if index == overview_start else "F5F7FA")
+        sheet.row_dimensions[index].height = 38 if index >= overview_start + 4 else 30
+    sheet.print_area = f"A1:{heading_end}{overview_start + len(overview) - 1}"
+    raw_sheet = workbook.create_sheet("raw data")
+    raw_sheet.append(["Source records and review notes (audit section)"])
+    raw_sheet.merge_cells("A1:F1")
+    raw_sheet["A1"].font = Font(name="Arial", size=14, bold=True, color="17365D")
+    raw_sheet.row_dimensions[1].height = 30
     for note in document["warnings"] + document["global_notes"]:
-        _append(sheet, ["Document note", note])
-    _append(sheet, ["Record ID", "Record Type", "Field", "Raw Value", "Unit", "Source Page"])
-    audit_header = sheet.max_row
+        _append(raw_sheet, ["Document note", note])
+    _append(raw_sheet, ["Record ID", "Record Type", "Field", "Raw Value", "Unit", "Source Page"])
+    audit_header = raw_sheet.max_row
     for record in document["records"]:
         for item in record["fields"]:
             value = item["value"]
@@ -387,21 +435,30 @@ def export_summary(semantic_path: str | Path, structured_path: str | Path, outpu
                 raw = str(value.get("normalized_value", ""))
             source = value.get("source") or {}
             for offset in range(0, max(1, len(raw)), 30000):
-                _append(sheet, [record.get("record_id"), record["record_type"], item["name"],
+                _append(raw_sheet, [record.get("record_id"), record["record_type"], item["name"],
                                raw[offset:offset + 30000], value.get("unit"), source.get("page_number")])
-    for cell in sheet[audit_header][:6]:
+    for cell in raw_sheet[audit_header][:6]:
         cell.fill = PatternFill("solid", fgColor="1F4E78")
         cell.font = Font(name="Arial", bold=True, color="FFFFFF")
         cell.alignment = Alignment(wrap_text=True, vertical="center")
-    sheet.row_dimensions[audit_header].height = 32
-    for cells in sheet.iter_rows(min_row=audit_header + 1, max_col=6):
+    raw_sheet.row_dimensions[audit_header].height = 32
+    for cells in raw_sheet.iter_rows(min_row=audit_header + 1, max_col=6):
         for cell in cells:
             cell.font = Font(name="Arial", size=10)
             cell.alignment = Alignment(wrap_text=True, vertical="top")
             cell.border = border
             if cell.row % 2:
                 cell.fill = PatternFill("solid", fgColor="F5F7FA")
-    fit_row_heights(sheet, audit_header + 1, sheet.max_row, 6)
+    fit_row_heights(raw_sheet, audit_header + 1, raw_sheet.max_row, 6)
+    for column, width in zip("ABCDEF", (28, 22, 28, 60, 14, 16)):
+        raw_sheet.column_dimensions[column].width = width
+    for cells in raw_sheet.iter_rows(min_row=2, max_row=audit_header - 1, max_col=2):
+        for cell in cells:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+    fit_row_heights(raw_sheet, 2, raw_sheet.max_row, 6)
+    raw_sheet.freeze_panes = f"A{audit_header + 1}"
+    raw_sheet.auto_filter.ref = f"A{audit_header}:F{raw_sheet.max_row}"
+    raw_sheet.sheet_view.showGridLines = False
     for cells in sheet:
         for cell in cells:
             if cell.data_type == "s" and isinstance(cell.value, str):

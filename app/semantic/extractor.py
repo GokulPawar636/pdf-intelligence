@@ -1871,12 +1871,12 @@ EVIDENCE:
             collapsed = " ".join(evidence_text.split())
             raw_text = " ".join((raw_value or "").split())
             if not raw_text or not valid_evidence or not re.search(
-                r"(?<![\w.])" + re.escape(raw_text) + r"(?!\w|\.\d)", collapsed
+                r"(?<![\w.+\-\u2212])" + re.escape(raw_text) + r"(?!\w|[.,]\d)", collapsed
             ):
                 warnings.append(f"Field '{name}' was discarded: its value is not supported by the cited source text.")
                 continue
             normalized_value = normalize_value(raw_value, field_name(name, "value"))
-            if unit and unit not in evidence_text:
+            if unit and not re.search(r"(?<!\w)" + re.escape(unit) + r"(?!\w)", evidence_text):
                 warnings.append(f"Field '{name}' unit was discarded because it is not present in the cited evidence.")
                 unit = None
             if source is not None:

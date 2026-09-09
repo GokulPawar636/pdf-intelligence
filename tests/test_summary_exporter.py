@@ -25,9 +25,14 @@ def test_supplied_pdf_produces_one_sheet_with_verified_values(tmp_path):
     output = run_pipeline(source, tmp_path, offline=True, report="summary")
     values = load_workbook(output, data_only=True)
     formulas = load_workbook(output, data_only=False)
-    assert values.sheetnames == ["Summary Report", "Differences"]
+    assert values.sheetnames == ["Summary Report", "Differences", "raw data"]
     sheet = values.active
-    assert sheet.max_row > 18  # source audit records retained below the report
+    assert sheet["A20"].value == "Report overview"
+    assert "12 characteristics | 12 readings" in sheet["C21"].value
+    assert "Within tolerance: 12 | Out of tolerance: 0" in sheet["C22"].value
+    assert "Review required" in sheet["C24"].value
+    assert values["raw data"].max_row > 100
+    assert values["raw data"]["A1"].value == "Source records and review notes (audit section)"
     # Independent transcription from the PDF, in page/table order.
     expected = [
         ("circle 3", "Z Distance", 18, 18.081, 0.5, "11"),

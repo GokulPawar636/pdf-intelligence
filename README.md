@@ -86,8 +86,8 @@ input failed. Successful execution exits with code 0.
 
 ## Measurement summary
 
-One worksheet contains the summary and a source audit section below it. The
-print area contains only the summary. Only supplied readings get columns; no
+The Summary Report worksheet contains the measurement report. Source records
+and review notes are on a separate `raw data` worksheet. Only supplied readings get columns; no
 empty historical dates or artificial measurements are added.
 
 - Object, Control, Nominal, Lower/Upper Tolerance, Tolerance and measurement(s)
@@ -110,7 +110,7 @@ empty historical dates or artificial measurements are added.
 - Audit columns are collapsed to keep the main table readable. They contain
   source pages, balloons, references, source results, notes, units, evidence,
   reading counts and tolerance offsets. All source records are also preserved
-  below the summary, including records that were not mapped to measurements.
+  on the `raw data` sheet, including records that were not mapped to measurements.
 - Formulas and cached values are both stored. Excel can recalculate on opening.
   The report is a snapshot of the input; regenerate after correcting source data.
 
@@ -148,6 +148,24 @@ unsupported measurements or detected specification conflicts. It is not a proof
 of extraction correctness. Source-level geometric/header heuristics still need
 review for unfamiliar layouts. Formula caches are validated before publication;
 opening and saving a workbook in Excel changes its file hash.
+
+Record-level warnings are included in the final manifest and upload screen in
+both offline and online modes. Inferred or uncertain table headers therefore
+produce `needs_review`; strict mode blocks their publication until the source
+layout is supported without those warnings. This also applies to the supplied
+sample: its numeric regression checks pass, but its headers are inferred.
+
+The manifest's `quality` section reports warning counts and measurement counts.
+`accuracy_verified` remains false: software confidence and passing automated
+checks are not a measured accuracy percentage. Establish deployment accuracy
+using independently transcribed examples from each intended PDF layout,
+including failed/scanned inputs, negative values, missing readings, and
+specification conflicts. The regression suite checks those implemented cases;
+it does not establish accuracy on unseen layouts.
+
+AI evidence validation rejects numeric fragments and dropped signs. Invalid,
+over-precision, or conflicting measurement specifications suppress tolerance
+limits and require review instead of producing an apparently passing result.
 
 ## Verification and deployment limits
 
