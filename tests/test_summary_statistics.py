@@ -31,7 +31,8 @@ def test_statistics_and_ambiguous_limits(tmp_path):
     assert values["L7"].value == pytest.approx(10 - 3 * 2**0.5)
     assert values["M7"].value == 9 and values["N7"].value == 11
     assert values["O7"].value == "Review"
-    assert formulas["I7"].value == '=IF(COUNT(G7:H7)=0,"",AVERAGE(G7:H7))'
+    assert 'INDEX($7:$7,1,COLUMN($I7)-1)' in formulas["I7"].value
+    assert 'AVERAGE(' in formulas["I7"].value
 
 
 def test_numbered_readings_and_safe_grouping():

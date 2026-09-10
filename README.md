@@ -111,8 +111,22 @@ empty historical dates or artificial measurements are added.
   source pages, balloons, references, source results, notes, units, evidence,
   reading counts and tolerance offsets. All source records are also preserved
   on the `raw data` sheet, including records that were not mapped to measurements.
-- Formulas and cached values are both stored. Excel can recalculate on opening.
-  The report is a snapshot of the input; regenerate after correcting source data.
+- Formulas and cached values are both stored. Excel recalculates on opening.
+  Edit readings, nominal values, and signed tolerances directly in the workbook.
+  Insert entire reading columns between Tolerance and Mean (including immediately
+  before Mean); statistics and overview totals expand automatically. Keep the
+  Tolerance and Mean anchor columns, and the formulas, intact.
+- Supported editable tolerance text includes `+/-0.5`, `±0.5`, and `+0.5/-0.2`.
+  Source absolute limits remain editable absolute values. Replacing a derived
+  limit formula with a number deliberately overrides that limit.
+- Differences contains live links for the original reading positions and a
+  latest-reading section that includes future reading columns. SD/UCL/LCL show
+  `N/A` until at least two numeric readings exist; nonnumeric readings cause
+  `Review`. Source review notes remain until verified and cleared in the
+  expandable detail columns. The `raw data` sheet preserves the original PDF.
+- Unrelated columns outside the reading area do not count as measurements.
+  New formulas for arbitrary business fields cannot be inferred safely. General
+  document exports retain their source-defined columns and Excel tables.
 
 ## General documents
 

@@ -7,3 +7,4 @@ data/intermediate/
 data/output/
 tmp/
 *.log
+.trunk/

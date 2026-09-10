@@ -23,6 +23,7 @@ from openpyxl.workbook.properties import CalcProperties
 
 from app.models.semantic import SemanticDocument
 from app.reporting.storage import save_workbook_atomic
+from app.reporting.live_summary import make_summary_live
 from app.reporting.excel_exporter import _append, extract_title_fields, fit_row_heights
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from app.models.structure import StructuredDocument
@@ -226,12 +227,14 @@ def _cache_formulas(path: Path, caches: dict[str, float | str]) -> None:
         entries = [(info, archive.read(info.filename)) for info in archive.infolist()]
     with ZipFile(path, "w", ZIP_DEFLATED) as archive:
         for info, data in entries:
-            if info.filename == "xl/worksheets/sheet1.xml":
+            sheet_match = re.fullmatch(r"xl/worksheets/sheet(\d+)\.xml", info.filename)
+            if sheet_match:
                 root = ET.fromstring(data)
                 for cell in root.iter(f"{{{namespace}}}c"):
-                    if cell.get("r") not in caches:
+                    key = cell.get("r") if sheet_match[1] == "1" else f"{sheet_match[1]}!{cell.get('r')}"
+                    if key not in caches:
                         continue
-                    cached = caches[cell.get("r")]
+                    cached = caches[key]
                     value = cell.find(f"{{{namespace}}}v")
                     if value is None:
                         value = ET.SubElement(cell, f"{{{namespace}}}v")
@@ -537,4 +540,5 @@ def export_summary(semantic_path: str | Path, structured_path: str | Path, outpu
     for row_index in range(header_row + 1, differences.max_row + 1):
         for column in range(4, 10):
             differences.cell(row_index, column).number_format = "0.000"
+    make_summary_live(workbook, rows, stat_start, caches, overview_start)
     return save_workbook_atomic(workbook, output_path, lambda path: _cache_formulas(path, caches))
