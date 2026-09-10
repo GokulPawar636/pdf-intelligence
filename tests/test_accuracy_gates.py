@@ -58,7 +58,7 @@ def test_offline_uncertainty_reaches_manifest_and_strict_gate(tmp_path):
     assert not list((tmp_path / "strict").rglob("*.xlsx"))
 
 
-def test_differences_checks_each_reading_independently(tmp_path):
+def test_differences_shows_one_latest_reading_per_feature(tmp_path):
     pairs = [("object", "Shaft"), ("control", "Diameter"), ("nominal", "10"),
              ("lower_limit", "9.5"), ("upper_limit", "10.5"),
              ("reading_1", "9"), ("reading_2", "10")]
@@ -71,7 +71,8 @@ def test_differences_checks_each_reading_independently(tmp_path):
     layout.write_text(json.dumps(structured), encoding="utf-8")
     workbook = load_workbook(export_summary(source, layout, tmp_path / "report.xlsx"), data_only=True)
     try:
-        assert workbook["Differences"]["J4"].value == "Out of tolerance"
-        assert workbook["Differences"]["J5"].value == "OK"
+        assert workbook["Differences"]["J4"].value == "OK"
+        assert workbook["Differences"]["E4"].value == 10
+        assert workbook["Differences"].max_row == 4
     finally:
         workbook.close()

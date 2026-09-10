@@ -86,8 +86,9 @@ input failed. Successful execution exits with code 0.
 
 ## Measurement summary
 
-The Summary Report worksheet contains the measurement report. Source records
-and review notes are on a separate `raw data` worksheet. Only supplied readings get columns; no
+Measurement workbooks contain exactly two sheets: Summary Report (the main
+sheet) and Differences. The summary contains the title and measurement table,
+without an overview block or raw data sheet. Only supplied readings get columns; no
 empty historical dates or artificial measurements are added.
 
 - Object, Control, Nominal, Lower/Upper Tolerance, Tolerance and measurement(s)
@@ -109,21 +110,23 @@ empty historical dates or artificial measurements are added.
   specification limits are distinct.
 - Audit columns are collapsed to keep the main table readable. They contain
   source pages, balloons, references, source results, notes, units, evidence,
-  reading counts and tolerance offsets. All source records are also preserved
-  on the `raw data` sheet, including records that were not mapped to measurements.
+  reading counts and tolerance offsets. Full source records remain in the
+  intermediate JSON files produced by the CLI.
 - Formulas and cached values are both stored. Excel recalculates on opening.
   Edit readings, nominal values, and signed tolerances directly in the workbook.
   Insert entire reading columns between Tolerance and Mean (including immediately
-  before Mean); statistics and overview totals expand automatically. Keep the
+  before Mean); statistics expand automatically. Keep the
   Tolerance and Mean anchor columns, and the formulas, intact.
 - Supported editable tolerance text includes `+/-0.5`, `±0.5`, and `+0.5/-0.2`.
   Source absolute limits remain editable absolute values. Replacing a derived
   limit formula with a number deliberately overrides that limit.
-- Differences contains live links for the original reading positions and a
-  latest-reading section that includes future reading columns. SD/UCL/LCL show
+- Differences contains one live table with one row per measured feature, using
+  its latest reading, including future reading columns. The first two columns
+  identify the measured feature and measurement type; source names are preserved.
+  SD/UCL/LCL show
   `N/A` until at least two numeric readings exist; nonnumeric readings cause
   `Review`. Source review notes remain until verified and cleared in the
-  expandable detail columns. The `raw data` sheet preserves the original PDF.
+  expandable detail columns. The Mean header comment explains how to add columns.
 - Unrelated columns outside the reading area do not count as measurements.
   New formulas for arbitrary business fields cannot be inferred safely. General
   document exports retain their source-defined columns and Excel tables.

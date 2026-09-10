@@ -25,14 +25,11 @@ def test_supplied_pdf_produces_one_sheet_with_verified_values(tmp_path):
     output = run_pipeline(source, tmp_path, offline=True, report="summary")
     values = load_workbook(output, data_only=True)
     formulas = load_workbook(output, data_only=False)
-    assert values.sheetnames == ["Summary Report", "Differences", "raw data"]
+    assert values.sheetnames == ["Summary Report", "Differences"]
     sheet = values.active
-    assert sheet["A20"].value == "Report overview"
-    assert "12 characteristics | 12 readings" in sheet["C21"].value
-    assert "Within tolerance: 12 | Out of tolerance: 0" in sheet["C22"].value
-    assert "Review required" in sheet["C24"].value
-    assert values["raw data"].max_row > 100
-    assert values["raw data"]["A1"].value == "Source records and review notes (audit section)"
+    assert sheet.max_row == 18
+    assert values.active.title == "Summary Report"
+    assert "Insert an entire reading/date column" in sheet["H6"].comment.text
     # Independent transcription from the PDF, in page/table order.
     expected = [
         ("circle 3", "Z Distance", 18, 18.081, 0.5, "11"),
@@ -68,6 +65,8 @@ def test_supplied_pdf_produces_one_sheet_with_verified_values(tmp_path):
     assert "Part name: HOLDING" in sheet["A4"].value
     assert "2025" not in str(sheet["G6"].value)
     differences = values["Differences"]
-    assert differences["A4"].value == "Object"
+    assert differences["A4"].value == "Measured Feature (Object)"
+    assert differences["B4"].value == "Measurement Type (Control)"
+    assert differences.max_row == 16  # one header plus 12 features, no second table
     assert differences["F5"].value == pytest.approx(0.081)
     assert differences["J5"].value == "OK"

@@ -31,13 +31,11 @@ try {
     Assert-Near $sheet.Range('J7').Value2 ([Math]::Sqrt(0.045)) 'SD after inserting column'
     Assert-Near $sheet.Range('K7').Value2 (18.15 + 3 * [Math]::Sqrt(0.045)) 'UCL'
     Assert-Near $sheet.Range('L7').Value2 (18.15 - 3 * [Math]::Sqrt(0.045)) 'LCL'
-    if ($sheet.Range('C21').Value2 -notlike '*13 readings*') { throw 'Overview reading count did not update' }
     $sheet.Range('F7').Value2 = '+/-0.1'
     $excel.CalculateFullRebuild()
     Assert-Near $sheet.Range('D7').Value2 17.9 'Edited lower tolerance'
     Assert-Near $sheet.Range('E7').Value2 18.1 'Edited upper tolerance'
     Assert-Text $sheet.Range('O7').Value2 'Out of tolerance' 'Edited tolerance result'
-    if ($sheet.Range('C22').Value2 -notlike '*Out of tolerance: 1*') { throw 'Overview status count did not update' }
     $sheet.Range('C7').Value2 = 19.0
     $sheet.Range('G7').Value2 = 19.0
     $sheet.Range('H7').Value2 = 19.05
@@ -46,9 +44,8 @@ try {
     Assert-Near $sheet.Range('D7').Value2 18.8 'Asymmetric lower limit'
     Assert-Near $sheet.Range('E7').Value2 19.5 'Asymmetric upper limit'
     Assert-Text $sheet.Range('O7').Value2 'OK' 'Updated result'
-    Assert-Near $book.Worksheets.Item('Differences').Range('F5').Value2 0.0 'Linked difference'
-    Assert-Near $book.Worksheets.Item('Differences').Range('E20').Value2 19.05 'Latest-reading link includes added column'
-    Assert-Near $book.Worksheets.Item('Differences').Range('F20').Value2 0.05 'Latest-reading difference'
+    Assert-Near $book.Worksheets.Item('Differences').Range('E5').Value2 19.05 'Latest-reading link includes added column'
+    Assert-Near $book.Worksheets.Item('Differences').Range('F5').Value2 0.05 'Latest-reading difference'
     $sheet.Range('H7').Value2 = 'bad reading'
     $excel.CalculateFullRebuild()
     Assert-Text $sheet.Range('I7').Value2 'Review' 'Invalid reading mean'
@@ -64,7 +61,7 @@ try {
     $sheet.Range('G7').Value2 = 18.8
     $excel.CalculateFullRebuild()
     Assert-Near $sheet.Range('I7').Value2 18.9 'New first reading included'
-    Write-Output 'PASS: Excel recalculation, inserted/deleted columns, SD/UCL/LCL, tolerance edits, overview, linked differences, and invalid readings.'
+    Write-Output 'PASS: Excel recalculation, inserted/deleted columns, SD/UCL/LCL, tolerance edits, linked differences, and invalid readings.'
 } finally {
     if ($book) { $book.Close($false) }
     if ($excel) {

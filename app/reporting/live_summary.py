@@ -24,7 +24,7 @@ def offset_formula(row, upper=False):
             f'{"" if upper else "-"}ABS(VALUE(MID({text},2,255))),{pair}),"")')
 
 
-def make_summary_live(workbook, rows, mean_column, caches, overview_start):
+def make_summary_live(workbook, rows, mean_column, caches):
     sheet = workbook["Summary Report"]
     last_row = 6 + len(rows)
     count_letter = letter(mean_column + 12)
@@ -72,32 +72,10 @@ def make_summary_live(workbook, rows, mean_column, caches, overview_start):
             "Editable tolerance: use +/-0.5, ±0.5, or +0.5/-0.2. Derived limits update automatically. "
             "If the PDF specifies absolute limits, edit Lower/Upper Tolerance directly instead.", "PDF Intelligence")
 
-    counts = f'{count_letter}7:{count_letter}{last_row}'
-    statuses = f'{status_letter}7:{status_letter}{last_row}'
-    put(overview_start + 1, 3,
-        f'=COUNTA(A7:A{last_row})&" characteristics | "&SUM({counts})&" readings | "&'
-        f'COUNTIF({counts},">=2")&" characteristics have 2+ readings for variation calculations."')
-    put(overview_start + 2, 3,
-        f'="Within tolerance: "&COUNTIF({statuses},"OK")&" | Out of tolerance: "&'
-        f'COUNTIF({statuses},"Out of tolerance")&" | Cannot determine / review: "&COUNTIF({statuses},"Review")')
-    unit_range = f'{letter(mean_column + 13)}7:{letter(mean_column + 13)}{last_row}'
-    with_units = sum(bool(row.unit) for row in rows)
-    unit_text = f'Units recorded for: {with_units} characteristics | Missing: {len(rows) - with_units}. See Unit in the expandable detail columns.'
-    put(overview_start + 3, 3,
-        f'="Units recorded for: "&COUNTIF({unit_range},"<>")&" characteristics | Missing: "&'
-        f'COUNTBLANK({unit_range})&". See Unit in the expandable detail columns."', unit_text)
-    quality_cell = sheet.cell(overview_start + 4, 3)
-    original_quality = quality_cell.value.replace('"', '""')
-    put(overview_start + 4, 3,
-        f'=IF(COUNTIF({statuses},"Review")>0,"Review required: inspect invalid or missing inputs and source Review Notes.","{original_quality}")')
-    sheet.cell(overview_start + 5, 3,
-        "Results check the latest reading. Differences includes original readings plus live latest-reading results. "
-        "N/A means too few readings for SD and control limits. Control limits are not specification limits.")
-    sheet.cell(overview_start + 6, 3,
-        "Edit readings in blue cells. To add a reading/date column, insert an entire Excel column immediately before Mean "
-        "(or inside the reading area), then enter numeric values. Keep formulas and the Mean column intact. "
-        "Review Notes refer to the original PDF; clear a note only after verifying its issue.")
-    sheet.row_dimensions[overview_start + 6].height = 54
+    sheet.cell(6, mean_column).comment = Comment(
+        "Insert an entire reading/date column immediately before Mean or inside the reading area. "
+        "Keep Mean and Tolerance intact. Statistics include the new readings automatically.",
+        "PDF Intelligence")
     validation = DataValidation(type="decimal", operator="between", formula1="-1E100", formula2="1E100", allow_blank=True)
     validation.errorTitle = "Enter a numeric measurement"
     validation.error = "Use numbers only. Leave missing measurements blank."
@@ -106,42 +84,12 @@ def make_summary_live(workbook, rows, mean_column, caches, overview_start):
     sheet.add_data_validation(validation)
     validation.add(f'G7:{letter(mean_column - 1)}{last_row}')
 
-    # Existing per-reading differences remain linked to their source reading.
-    # New reading columns contribute to the summary and overview immediately.
+    # One live row per feature; future reading columns update this same table.
     differences = workbook["Differences"]
-    header = next(cell.row for cell in differences['A'] if cell.value == 'Object')
-    target_row = header + 1
+    header = next(cell.row for cell in differences['A'] if cell.value == 'Measured Feature (Object)')
     prefix = "'Summary Report'!"
-    for source_row, source in enumerate(rows, 7):
-        for reading_index, _ in enumerate(source.measurements):
-            for dest, origin in ((1, 1), (2, 2), (3, mean_column + 7), (4, 3),
-                                 (5, 7 + reading_index), (7, 6), (8, 4), (9, 5),
-                                 (11, mean_column + 9), (12, mean_column + 8)):
-                cell = differences.cell(target_row, dest)
-                caches[f'2!{cell.coordinate}'] = cell.value if cell.value is not None else ""
-                ref = f'{prefix}{letter(origin)}{source_row}'
-                cell.value = f'=IF({ref}="","",{ref})'
-            cell = differences.cell(target_row, 6)
-            caches[f'2!{cell.coordinate}'] = cell.value if cell.value is not None else ""
-            cell.value = f'=IF(AND(ISNUMBER(D{target_row}),ISNUMBER(E{target_row})),E{target_row}-D{target_row},"")'
-            cell = differences.cell(target_row, 10)
-            caches[f'2!{cell.coordinate}'] = cell.value
-            cell.value = (f'=IFERROR(IF(OR({prefix}{notes_letter}{source_row}<>"",'
-                          f'NOT(ISNUMBER(E{target_row})),NOT(ISNUMBER(H{target_row})),NOT(ISNUMBER(I{target_row})),'
-                          f'H{target_row}>I{target_row}),"Review",IF(AND(E{target_row}>=H{target_row},'
-                          f'E{target_row}<=I{target_row}),"OK","Out of tolerance")),"Review")')
-            target_row += 1
-    latest_title = target_row + 1
-    differences.merge_cells(start_row=latest_title, start_column=1, end_row=latest_title, end_column=12)
-    differences.cell(latest_title, 1, "Latest readings - includes future reading columns")
-    differences.cell(latest_title, 1)._style = copy(differences['A1']._style)
-    differences.row_dimensions[latest_title].height = 30
-    latest_header = latest_title + 1
-    for c in range(1, 13):
-        differences.cell(latest_header, c, differences.cell(header, c).value)
-        differences.cell(latest_header, c)._style = copy(differences.cell(header, c)._style)
-    differences.cell(latest_header, 5, "Latest Measurement")
-    differences.row_dimensions[latest_header].height = 36
+    latest_header = header
+    differences.cell(header, 5, "Latest Measurement")
     for r, source in enumerate(rows, 7):
         dest_row = latest_header + r - 6
         def latest_put(column, formula, cached):
@@ -166,4 +114,4 @@ def make_summary_live(workbook, rows, mean_column, caches, overview_start):
     for value, color in (("OK", "C6EFCE"), ("Review", "FFEB9C"), ("Out of tolerance", "FFC7CE")):
         differences.conditional_formatting.add(f'J{header + 1}:J{target_row - 1}',
             CellIsRule(operator="equal", formula=[f'"{value}"'], fill=PatternFill("solid", fgColor=color)))
-    differences["A2"] = "Top: original PDF reading positions, linked to Summary Report. Below: latest readings, including newly inserted reading columns."
+    differences["A2"] = "One row per measured feature. Difference = latest reading - nominal. Values update from Summary Report, including new reading columns."
