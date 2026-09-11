@@ -87,6 +87,10 @@ def run_pipeline(pdf: str | Path, output_dir: str | Path = "data/output", *,
         payload = json.loads(Path(semantic).read_text(encoding="utf-8"))
         layout = json.loads(Path(structure).read_text(encoding="utf-8"))
         issues = list(payload.get("warnings", []))
+        from app.ingestion.coverage import inspect_coverage
+        coverage = inspect_coverage(source)
+        manifest["coverage"] = coverage
+        issues.extend(coverage["warnings"])
         # Record-level uncertainty must also reach the manifest and upload UI.
         # Keeping the raw cells does not establish that their inferred headers are correct.
         issues.extend(f"Record {record.get('record_id')}: {warning}"
@@ -105,6 +109,13 @@ def run_pipeline(pdf: str | Path, output_dir: str | Path = "data/output", *,
                 except ValueError as exc:
                     issues.append(f"Record {record.get('record_id')}: {exc}")
         summary_rows = build_summary_rows(payload, layout)
+        chosen = select_report(payload, layout) if report == "auto" else report
+        if chosen == "dynamic" and report == "auto":
+            from app.reporting.feature_tables import read_feature_tables
+            native_rows = read_feature_tables(source)
+            if native_rows:
+                summary_rows = native_rows
+                chosen = "summary"
         issues.extend(note for row in summary_rows for note in row.warnings)
         issues = list(dict.fromkeys(issues))
         manifest.update(records=len(payload["records"]), warnings=issues,
@@ -117,11 +128,10 @@ def run_pipeline(pdf: str | Path, output_dir: str | Path = "data/output", *,
             raise ValueError("Strict quality check failed. " + "; ".join(issues))
         payload["warnings"] = issues
         _write_json(Path(semantic), payload)
-        chosen = select_report(payload, layout) if report == "auto" else report
         manifest.update(selected_report=chosen, stage="export")
         _write_json(manifest_path, manifest)
         if chosen == "summary":
-            output = export_summary(semantic, structure, target / f"{source.stem}_summary.xlsx")
+            output = export_summary(semantic, structure, target / f"{source.stem}_summary.xlsx", summary_rows=summary_rows)
         else:
             output = export_semantic_to_excel(semantic, target / f"{source.stem}.xlsx")
         manifest.update(status="needs_review" if issues else "complete", stage="complete",
@@ -138,6 +148,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Convert PDFs to validated, document-driven Excel workbooks.")
     parser.add_argument("pdf", nargs="+", help="One or more input PDF paths; each receives an isolated workbook")
     parser.add_argument("--output-dir", default="data/output")
+    parser.add_argument("--combine", action="store_true", help="Combine PDFs into one workbook with matched measurement columns")
     parser.add_argument("--offline", action="store_true", help="Extract locally without sending content to Groq")
     parser.add_argument("--model", default="qwen/qwen3.8-27b")
     parser.add_argument("--report", choices=["auto", "dynamic", "summary"], default="auto")
@@ -147,6 +158,16 @@ def main() -> int:
     parser.add_argument("--render-assets", action="store_true", help="Save page and embedded images for diagnosis")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    if args.combine:
+        from app.batch import run_batch
+        try:
+            output = run_batch(args.pdf, args.output_dir, offline=args.offline, strict=args.strict,
+                               max_pages=args.max_pages, max_mb=args.max_mb)
+            print(f"Workbook: {output}")
+            return 0
+        except Exception as exc:
+            logger.error("Combined report failed: %s", exc)
+            return 1
     failed = False
     for source in args.pdf:
         try:

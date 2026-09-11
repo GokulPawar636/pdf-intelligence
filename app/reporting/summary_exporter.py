@@ -15,6 +15,7 @@ from xml.etree import ElementTree as ET
 from zipfile import ZipFile, ZIP_DEFLATED
 
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as WorksheetImage
 from openpyxl.comments import Comment
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -62,7 +63,7 @@ class SummaryRow:
     lower: Decimal | None
     upper: Decimal | None
     tolerance: str
-    measurements: list[Decimal]
+    measurements: list[Decimal | None]
     balloon: str = ""
     reference: str = ""
     page: str = ""
@@ -244,10 +245,16 @@ def _cache_formulas(path: Path, caches: dict[str, float | str]) -> None:
             archive.writestr(info, data)
 
 
-def export_summary(semantic_path: str | Path, structured_path: str | Path, output_path: str | Path) -> Path:
-    document = SemanticDocument.model_validate_json(Path(semantic_path).read_text(encoding="utf-8")).model_dump()
-    structured = StructuredDocument.model_validate_json(Path(structured_path).read_text(encoding="utf-8")).model_dump()
-    rows = build_summary_rows(document, structured)
+def export_summary(semantic_path: str | Path, structured_path: str | Path, output_path: str | Path, *,
+                   summary_rows=None, measurement_headers=None, report_title=None,
+                   source_caption=None, title_fields_override=None, numeric_format="0.000", logo_path=None) -> Path:
+    if semantic_path is None and structured_path is None and summary_rows is not None:
+        document = {"document_metadata": {"file_name": "Excel input"}, "records": []}
+        structured = {"pages": []}
+    else:
+        document = SemanticDocument.model_validate_json(Path(semantic_path).read_text(encoding="utf-8")).model_dump()
+        structured = StructuredDocument.model_validate_json(Path(structured_path).read_text(encoding="utf-8")).model_dump()
+    rows = build_summary_rows(document, structured) if summary_rows is None else summary_rows
     if not rows:
         raise ValueError("No measurement records found for a summary report. Use the dynamic report for this document.")
     source_name = document["document_metadata"].get("file_name", "Input PDF")
@@ -259,24 +266,26 @@ def export_summary(semantic_path: str | Path, structured_path: str | Path, outpu
     sheet = workbook.active
     sheet.title = "Summary Report"
     count = max(len(row.measurements) for row in rows)
+    if count + 23 > 16384 or len(rows) + 6 > 1048576:
+        raise ValueError("This report exceeds Excel's row or column limit. Split the upload into smaller batches.")
     stat_start = 7 + count
     last_column = stat_start + 16
     end = get_column_letter(last_column)
     heading_end = get_column_letter(stat_start + 6)
     sheet.merge_cells(f"A1:{heading_end}1")
-    sheet["A1"] = f"Summary Report - {Path(source_name).stem}"
+    sheet["A1"] = report_title or f"Summary Report - {Path(source_name).stem}"
     sheet["A1"].font = Font(name="Arial", size=18, bold=True, color="FFFFFF")
     sheet["A1"].fill = PatternFill("solid", fgColor="17365D")
     sheet["A1"].alignment = Alignment(horizontal="center", vertical="center")
     sheet.row_dimensions[1].height = 40
-    for row, text in [(2, f"Source: {source_name} | Inspection date: {date_label} | Measurements: {len(rows)}"),
+    for row, text in [(2, source_caption or f"Source: {source_name} | Inspection date: {date_label} | Measurements: {len(rows)}"),
                       (3, "Limits are nominal plus signed tolerance. Std Deviation = sample variation; UCL = Mean + 3 x Std Deviation; LCL = Mean - 3 x Std Deviation. N/A means fewer than 2 readings; variation cannot be estimated.")]:
         sheet.merge_cells(f"A{row}:{heading_end}{row}")
         sheet.cell(row, 1, text).alignment = Alignment(wrap_text=True, vertical="center", horizontal="left", indent=1)
         sheet.cell(row, 1).font = Font(name="Arial", size=10, color="43566B")
         sheet.cell(row, 1).fill = PatternFill("solid", fgColor="F5F7FA")
         sheet.row_dimensions[row].height = 28
-    title_fields = extract_title_fields(document)
+    title_fields = extract_title_fields(document) if title_fields_override is None else title_fields_override
     title_text = " | ".join(f"{label}: {value}" for label, value in title_fields)
     if title_text:
         sheet.merge_cells(f"A4:{heading_end}4")
@@ -293,6 +302,11 @@ def export_summary(semantic_path: str | Path, structured_path: str | Path, outpu
     for index in range(count):
         sheet.cell(5, 7 + index, "Measurement" if count == 1 else f"Measurement {index + 1}")
         sheet.cell(6, 7 + index, date_label if count == 1 else "Reading " + str(index + 1))
+        if measurement_headers:
+            sheet.cell(5, 7 + index, measurement_headers[index]["title"])
+            sheet.cell(6, 7 + index, measurement_headers[index]["label"])
+            sheet.cell(6, 7 + index).data_type = "s"
+            sheet.cell(5, 7 + index).comment = Comment(measurement_headers[index]["source"], "PDF Intelligence")
     sheet.merge_cells(start_row=5, start_column=stat_start, end_row=5, end_column=stat_start + 3)
     sheet.cell(5, stat_start, "Statistics")
     sheet.merge_cells(start_row=5, start_column=stat_start + 4, end_row=5, end_column=stat_start + 6)
@@ -322,13 +336,14 @@ def export_summary(semantic_path: str | Path, structured_path: str | Path, outpu
 
         measurement_end = get_column_letter(6 + count)
         span = f"G{r}:{measurement_end}{r}"
-        vals = [float(v) for v in row.measurements]
+        vals = [float(v) for v in row.measurements if v is not None]
         mean = statistics.mean(vals)
         deviation = statistics.stdev(vals) if len(vals) > 1 else None
         mean_cell = f"{get_column_letter(stat_start)}{r}"
         std_cell = f"{get_column_letter(stat_start + 1)}{r}"
         valid_limits = row.lower is not None and row.upper is not None
-        status = "OK" if valid_limits and row.lower <= row.measurements[-1] <= row.upper else "Out of tolerance" if valid_limits else "Review"
+        latest_reading = next(v for v in reversed(row.measurements) if v is not None)
+        status = "OK" if valid_limits and row.lower <= latest_reading <= row.upper else "Out of tolerance" if valid_limits else "Review"
         needs_review = bool(row.warnings)
         if needs_review:
             status = "Review"
@@ -368,7 +383,7 @@ def export_summary(semantic_path: str | Path, structured_path: str | Path, outpu
             elif cell.row % 2 and cell.column != stat_start + 6:
                 cell.fill = PatternFill("solid", fgColor="F5F7FA")
             if cell.row > 6 and 3 <= cell.column < stat_start + 6 and cell.column != 6:
-                cell.number_format = "0.000"
+                cell.number_format = numeric_format
     for row in (5, 6):
         sheet.row_dimensions[row].height = 42
     for column in range(1, last_column + 1):
@@ -406,7 +421,7 @@ def export_summary(semantic_path: str | Path, structured_path: str | Path, outpu
     differences = workbook.create_sheet("Differences", 1)
     difference_end = get_column_letter(12)
     differences.merge_cells(f"A1:{difference_end}1")
-    differences["A1"] = f"Differences - {Path(source_name).stem}"
+    differences["A1"] = report_title.replace("Inspection Summary", "Measurement Differences") if report_title else f"Differences - {Path(source_name).stem}"
     differences["A1"].font = Font(name="Arial", size=16, bold=True, color="17365D")
     differences["A1"].alignment = Alignment(horizontal="center", vertical="center")
     differences.merge_cells(f"A2:{difference_end}2")
@@ -422,7 +437,7 @@ def export_summary(semantic_path: str | Path, structured_path: str | Path, outpu
                "Tolerance", "Lower Limit", "Upper Limit", "Status", "Source Page", "Reference Feature"]
     _append(differences, headers)
     for row in rows:
-        for measurement in row.measurements[-1:]:
+        for measurement in [next(v for v in reversed(row.measurements) if v is not None)]:
             status = "Review" if row.warnings or row.lower is None or row.upper is None else (
                 "OK" if row.lower <= measurement <= row.upper else "Out of tolerance")
             _append(differences, [row.object_name, row.control,
@@ -477,6 +492,25 @@ def export_summary(semantic_path: str | Path, structured_path: str | Path, outpu
     fit_row_heights(differences, header_row + 1, differences.max_row)
     for row_index in range(header_row + 1, differences.max_row + 1):
         for column in range(4, 10):
-            differences.cell(row_index, column).number_format = "0.000"
+            differences.cell(row_index, column).number_format = numeric_format
     make_summary_live(workbook, rows, stat_start, caches)
+    if logo_path:
+        # Reserve space inside the existing title row so live table references
+        # and insert-column anchors remain unchanged.
+        for target, last in ((sheet, heading_end), (differences, difference_end)):
+            title = target['A1'].value
+            target.unmerge_cells(f'A1:{last}1')
+            target['A1'] = None
+            target.merge_cells('A1:C1')
+            target.merge_cells(f'D1:{last}1')
+            target['D1'] = title
+            target['D1'].font = Font(name='Arial', size=18, bold=True, color='FFFFFF')
+            target['D1'].fill = PatternFill('solid', fgColor='17365D')
+            target['D1'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            target['A1'].fill = PatternFill('solid', fgColor='FFFFFF')
+            logo = WorksheetImage(str(logo_path))
+            logo.height = 300*logo.height/logo.width
+            logo.width = 300
+            target.add_image(logo, 'A1')
+            target.row_dimensions[1].height = 60
     return save_workbook_atomic(workbook, output_path, lambda path: _cache_formulas(path, caches))

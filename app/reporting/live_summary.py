@@ -46,7 +46,7 @@ def make_summary_live(workbook, rows, mean_column, caches):
         put(r, mean_column + 1, f'=IF({invalid},"Review",IF(COUNT({span})<2,"N/A",STDEV({span})))')
         for offset, sign in ((2, "+"), (3, "-")):
             put(r, mean_column + offset, f'=IF({invalid},"Review",IF(COUNT({span})<2,"N/A",{mean}{sign}3*{sd}))')
-        put(r, mean_column + 12, f'=COUNT({span})', len(source.measurements))
+        put(r, mean_column + 12, f'=COUNT({span})', sum(v is not None for v in source.measurements))
         latest = f'LOOKUP(9.99999999999999E+307,{span})'
         put(r, mean_column + 6,
             f'=IFERROR(IF(OR({notes_letter}{r}<>"",{invalid},COUNT({span})=0,'
@@ -102,11 +102,15 @@ def make_summary_live(workbook, rows, mean_column, caches):
             cell = sheet.cell(r, origin)
             latest_put(dest, f'=IF({ref}="","",{ref})', caches.get(cell.coordinate, cell.value))
         span = reading_span(r, mean_column, prefix)
+        latest_value = next(v for v in reversed(source.measurements) if v is not None)
         latest_put(5, f'=IF(COUNTA({span})<>COUNT({span}),"Review",IF(COUNT({span})=0,"",LOOKUP(9.99999999999999E+307,{span})))',
-                   float(source.measurements[-1]))
+                   float(latest_value))
         latest_put(6, f'=IF(AND(ISNUMBER(D{dest_row}),ISNUMBER(E{dest_row})),E{dest_row}-D{dest_row},"")',
-                   float(source.measurements[-1] - source.nominal) if source.nominal is not None else "")
-        differences.row_dimensions[dest_row].height = 30
+                   float(latest_value - source.nominal) if source.nominal is not None else "")
+        # Preserve the exporter height calculated from source labels and pages.
+        differences.row_dimensions[dest_row].height = max(
+            30, differences.row_dimensions[dest_row].height or 0
+        )
     target_row = differences.max_row + 1
     differences.print_area = differences.dimensions
     # Compact reports fit on one page; larger reports retain readable pagination.
